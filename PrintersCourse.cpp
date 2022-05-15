@@ -7,9 +7,11 @@
 using namespace std;
 
 #define comm MPI_COMM_WORLD
+//количество аргументов в сообщении серверу
+#define SizeMessageServer 4
 
 //количество итераций жизненного цикла
-const int maxIteration = 4;
+const int maxIteration = 1;
 //Код выхода
 const int codeExit = -99;
 //признак принтера А
@@ -26,7 +28,6 @@ const int exitPrintPrinterB = 211;
 const int canBePrintedA = 101;
 //признак - можно печатать на принтере Б
 const int canBePrintedB = 201;
-
 
 /// <summary>
 /// Функция определения времени и даты
@@ -55,7 +56,7 @@ bool NeedToPrint(int rank)
 	//Степень необходимости печатать
 	int gradePrint = rand() % 100 + 1;
 
-	if (gradePrint > 43)
+	if (gradePrint >= 25)
 	{
 		return true;
 	}
@@ -188,6 +189,23 @@ public:
 
 
 /// <summary>
+/// Тип данных для сообщения серверу
+/// </summary>
+struct MessageServer
+{
+	//номер процесса
+	int numberProcess;
+	//кол-во строк для печати
+	int timeExecution;
+	//место откуда начинаем чтение
+	int startPoint;
+	//имя файла откуда считывать
+	char nameFile[20];
+};
+
+
+
+/// <summary>
 /// Главная функция, где происходит параллельность
 /// </summary>
 int main(int argc, char** argv)
@@ -208,48 +226,96 @@ int main(int argc, char** argv)
 		MPI_Finalize();
 		return 3;
 	}
+	if (size < 6)
+	{
+		if (rank == 0)
+		{
+			cout << "Количество процессов не соответствует требованию!" << endl;
+		}
+		MPI_Finalize();
+		return 101;
+	}
 
 	MPI_Status status;
 
 	//роль сервера
 	bool server = false;
-	//клиент принтера А
+	//роль принтера А
 	bool printerA = false;
-	//клиент принтера Б
+	//роль принтера Б
 	bool printerB = false;
+	//клиент принтера А
+	bool userPrinterA = false;
+	//клиент принтера Б
+	bool userPrinterB = false;
 	//клиент обоих принтерев
-	bool printerAandB = false;
+	bool userPrinterAandB = false;
 
+	//количество процессов не пользователей
+	int amountNotUsers = 3;
 	//пользователи только принтера А
-	int amountOnlyPrinterA = size / 3;
+	int amountOnlyPrinterA = size / 4;
 	//пользователи только принтера Б
-	int amountOnlyPrinterB = size / 3;
+	int amountOnlyPrinterB = size / 4;
 	//пользователи принтера А и Б
-	int amountAllPrinters = size - (amountOnlyPrinterA + amountOnlyPrinterB + 1);
+	int amountAllPrinters = size - (amountOnlyPrinterA + amountOnlyPrinterB + amountNotUsers);
+
+	//getchar();
+
+	//сообщение серверу
+	MessageServer messageServer;
+	MPI_Datatype MsgServerType;
+	MPI_Datatype MsgServerTypes[SizeMessageServer] =
+	{
+		MPI_INT,MPI_INT,MPI_INT,MPI_CHAR
+	};
+	int blockLengthMsgServer[SizeMessageServer] = { 1,1,1,20 };
+	MPI_Aint dispMsgServer[SizeMessageServer];
+	//получаем адреса
+	MPI_Get_address(&messageServer.numberProcess, &dispMsgServer[0]);
+	MPI_Get_address(&messageServer.timeExecution, &dispMsgServer[1]);
+	MPI_Get_address(&messageServer.startPoint, &dispMsgServer[2]);
+	MPI_Get_address(&messageServer.nameFile, &dispMsgServer[3]);
+	for (int i = 0; i < SizeMessageServer; i++)
+	{
+		dispMsgServer[i] -= dispMsgServer[0];
+	}
+	MPI_Type_create_struct(SizeMessageServer, blockLengthMsgServer, dispMsgServer, MsgServerTypes, &MsgServerType);
+	//создаем тип
+	MPI_Type_commit(&MsgServerType);
 
 	//распределение ролей
 	if (rank == 0)
 	{
 		server = true;
 	}
-	if ((rank > 0) && (rank <= amountOnlyPrinterA))
+	if (rank == 1)
 	{
 		printerA = true;
 	}
-	if ((rank > amountOnlyPrinterA) && (rank <= (amountOnlyPrinterB + amountOnlyPrinterA)))
+	if (rank == 2)
 	{
 		printerB = true;
 	}
-	if (rank > (amountOnlyPrinterB + amountOnlyPrinterA))
+	if ((rank >= amountNotUsers) && (rank < (amountOnlyPrinterA + amountNotUsers)))
 	{
-		printerAandB = true;
+		userPrinterA = true;
 	}
+	if ((rank >= (amountOnlyPrinterA + amountNotUsers)) && (rank < (amountOnlyPrinterB + amountOnlyPrinterA + amountNotUsers)))
+	{
+		userPrinterB = true;
+	}
+	if (rank >= (amountOnlyPrinterB + amountOnlyPrinterA + amountNotUsers))
+	{
+		userPrinterAandB = true;
+	}
+
+	//признак нахождения сообщения
+	int flagMessage = 0;
 
 	//сервер
 	if (server)
 	{
-		//признак нахождения сообщения
-		int flagMessage = 0;
 		//количество отправленных кодов выхода
 		int amountExitCode = 0;
 
@@ -259,16 +325,16 @@ int main(int argc, char** argv)
 		bool busyPrinterB = false;
 
 		//очередь на печать принтера А
-		list<int> queuePrinterA;
+		list<MessageServer> queuePrinterA;
 		//очередь на печать принтера Б
-		list<int> queuePrinterB;
+		list<MessageServer> queuePrinterB;
 
-		//номер процесса который хочет печатать
-		int rankSourceMessage;
+		//информация о запросе
+		MessageServer rankSourceMessage;
 		//номер процесса первого в очереди на печать принтера А
-		int rankFirstQueuePrinterA;
+		MessageServer rankFirstQueuePrinterA;
 		//номер процесса первого в очереди на печать принтера Б
-		int rankFirstQueuePrinterB;
+		MessageServer rankFirstQueuePrinterB;
 
 		//бесконечная работа сервера до выхода всех процессов
 		while (true)
@@ -284,16 +350,16 @@ int main(int argc, char** argv)
 				//выход первого процесса в очереди 
 				queuePrinterA.pop_front();
 
-				//предоставление доступа на печать на принтере А
-				if (rankFirstQueuePrinterA > (amountOnlyPrinterB + amountOnlyPrinterA))
+				//отправка задачи-печати
+				if (rankFirstQueuePrinterA.numberProcess >= (amountOnlyPrinterB + amountOnlyPrinterA + amountNotUsers))
 				{
-					MPI_Send(&canBePrintedA, 1, MPI_INT, rankFirstQueuePrinterA, signPrinterAandB, comm);
+					MPI_Send(&rankFirstQueuePrinterA, 1, MsgServerType, 1, signPrinterAandB, comm);
 				}
 				else
 				{
-					MPI_Send(&canBePrintedA, 1, MPI_INT, rankFirstQueuePrinterA, signPrinterA, comm);
+					MPI_Send(&rankFirstQueuePrinterA, 1, MsgServerType, 1, signPrinterA, comm);
 				}
-				cout << "Пользователь №" << rankFirstQueuePrinterA << " начал печатать на принтере А" << endl;
+				cout << "Пользователь №" << rankFirstQueuePrinterA.numberProcess << " начал печатать на принтере А" << endl;
 			}
 			//принтер Б свободен и в очереди есть люди
 			if ((!busyPrinterB) && (queuePrinterB.size() > 0))
@@ -305,330 +371,419 @@ int main(int argc, char** argv)
 				//выход первого процесса в очереди 
 				queuePrinterB.pop_front();
 
-				//предоставление доступа на печать на принтере Б
-				if (rankFirstQueuePrinterB > (amountOnlyPrinterB + amountOnlyPrinterA))
+				//отправка задачи-печати
+				if (rankFirstQueuePrinterB.numberProcess >= (amountOnlyPrinterB + amountOnlyPrinterA + amountNotUsers))
 				{
-					MPI_Send(&canBePrintedB, 1, MPI_INT, rankFirstQueuePrinterB, signPrinterAandB, comm);
+					MPI_Send(&rankFirstQueuePrinterB, 1, MsgServerType, 2, signPrinterAandB, comm);
 				}
 				else
 				{
-					MPI_Send(&canBePrintedB, 1, MPI_INT, rankFirstQueuePrinterB, signPrinterB, comm);
+					MPI_Send(&rankFirstQueuePrinterB, 1, MsgServerType, 2, signPrinterB, comm);
 				}
-				cout << "Пользователь №" << rankFirstQueuePrinterB << " начал печатать на принтере Б" << endl;
+				cout << "Пользователь №" << rankFirstQueuePrinterB.numberProcess << " начал печатать на принтере B" << endl;
 			}
 
-			//ищем сообщения пользователя принтера А
-			MPI_Iprobe(MPI_ANY_SOURCE, signPrinterA, comm, &flagMessage, &status);
+			//ищем запросы
+			MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &flagMessage, &status);
 			//пользователь принтера А хочет взаимодествовать с принтером
 			if (flagMessage)
 			{
-				//получение желания пользователя на печать на принтере А
-				MPI_Recv(&rankSourceMessage, 1, MPI_INT, status.MPI_SOURCE, signPrinterA, comm, &status);
-
-				//Пользователь просит разрешение на печать
-				if ((rankSourceMessage > 0) && (rankSourceMessage < size))
+				//отправил сообщение пользователь принтера А
+				if (status.MPI_TAG == signPrinterA)
 				{
-					cout << "Пользователь №" << rankSourceMessage << " хочет печатать на принтере А" << endl;
+					//получение желания пользователя на печать на принтере А
+					MPI_Recv(&rankSourceMessage, 1, MsgServerType, status.MPI_SOURCE, signPrinterA, comm, &status);
 
-					// принтер А свободен
-					if (!busyPrinterA)
+					//Пользователь просит разрешение на печать
+					if ((rankSourceMessage.numberProcess >= amountNotUsers) && (rankSourceMessage.numberProcess < size))
 					{
-						//принтер заняли
-						busyPrinterA = true;
-						//предоставление доступа на печать на принтере А
-						MPI_Send(&canBePrintedA, 1, MPI_INT, rankSourceMessage, signPrinterA, comm);
-						cout << "Пользователь №" << rankSourceMessage << " начал печатать на принтере А" << endl;
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " хочет печатать на принтере А" << endl;
+
+						// принтер А свободен
+						if (!busyPrinterA)
+						{
+							//принтер заняли
+							busyPrinterA = true;
+							//предоставление доступа на печать на принтере А
+							MPI_Send(&rankSourceMessage, 1, MsgServerType, 1, signPrinterA, comm);
+							cout << "Пользователь №" << rankSourceMessage.numberProcess << " начал печатать на принтере А" << endl;
+						}
+						//принтер А занят печатью другого пользователя
+						else
+						{
+							//добавление пользователя в очередь
+							queuePrinterA.push_back(rankSourceMessage);
+						}
 					}
-					//принтер А занят печатью другого пользователя
-					else
+					//принтер А закончил печать 
+					else if ((status.MPI_SOURCE == 1))
 					{
-						//добавление пользователя в очередь
-						queuePrinterA.push_back(rankSourceMessage);
+						//отправка сообщения об окончании печати
+						MPI_Send(&exitPrintPrinterA, 1, MPI_INT, rankSourceMessage.numberProcess, printerA, comm);
+						//принтер свободен
+						busyPrinterA = false;
+
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " закончил печатать на принтере А" << endl;
 					}
-				}
-				//пользователь закончил печать на принтере А
-				else if ((rankSourceMessage == exitPrintPrinterA))
-				{
-					//принтер свободен
-					busyPrinterA = false;
-					cout << "Пользователь №" << status.MPI_SOURCE << " закончил печатать на принтере А" << endl;
-				}
-				//у пользователей начались выходные - код выхода из программы
-				else
-				{
-					amountExitCode++;
-					cout << "Пользователь №" << status.MPI_SOURCE << " уходит на выходные" << endl;
-				}
-			}
-
-			//ищем сообщения пользователя принтера Б
-			MPI_Iprobe(MPI_ANY_SOURCE, signPrinterB, comm, &flagMessage, &status);
-			//пользователь принтера Б хочет взаимодествовать с принтером
-			if (flagMessage)
-			{
-				//получение желания пользователя на печать на принтере Б
-				MPI_Recv(&rankSourceMessage, 1, MPI_INT, status.MPI_SOURCE, signPrinterB, comm, &status);
-
-				//Пользователь просит разрешение на печать
-				if ((rankSourceMessage > 0) && (rankSourceMessage < size))
-				{
-					cout << "Пользователь №" << rankSourceMessage << " хочет печатать на принтере Б" << endl;
-
-					// принтер Б свободен
-					if (!busyPrinterB)
+					//у пользователей начались выходные - код выхода из программы
+					else if (rankSourceMessage.numberProcess == codeExit)
 					{
-						//принтер заняли
-						busyPrinterB = true;
-						//предоставление доступа на печать на принтере Б
-						MPI_Send(&canBePrintedB, 1, MPI_INT, rankSourceMessage, signPrinterB, comm);
-						cout << "Пользователь №" << rankSourceMessage << " начал печатать на принтере Б" << endl;
-					}
-					//принтер Б занят печатью другого пользователя
-					else
-					{
-						//добавление пользователя в очередь
-						queuePrinterB.push_back(rankSourceMessage);
+						amountExitCode++;
+						cout << "Пользователь №" << status.MPI_SOURCE << " уходит на выходные" << endl;
 					}
 				}
-				//пользователь закончил печать на принтере Б
-				else if ((rankSourceMessage == exitPrintPrinterB))
+				//отправил сообщение пользователь принтера Б
+				if (status.MPI_TAG == signPrinterB)
 				{
-					//освобождение принтера
-					busyPrinterB = false;
-					cout << "Пользователь №" << status.MPI_SOURCE << " закончил печатать на принтере Б" << endl;
-				}
-				//у пользователей начались выходные - код выхода из программы
-				else
-				{
-					amountExitCode++;
-					cout << "Пользователь №" << status.MPI_SOURCE << " уходит на выходные" << endl;
-				}
-			}
+					///получение желания пользователя на печать на принтере А
+					MPI_Recv(&rankSourceMessage, 1, MsgServerType, status.MPI_SOURCE, signPrinterB, comm, &status);
 
-			//ищем сообщения пользователя любого принтера
-			MPI_Iprobe(MPI_ANY_SOURCE, signPrinterAandB, comm, &flagMessage, &status);
-			//пользователь любого принтера хочет взаимодействовать с принтером
-			if (flagMessage)
-			{
-				//получение желания пользователя на печать на принтере Б
-				MPI_Recv(&rankSourceMessage, 1, MPI_INT, status.MPI_SOURCE, signPrinterAandB, comm, &status);
+					//Пользователь просит разрешение на печать
+					if ((rankSourceMessage.numberProcess >= amountNotUsers) && (rankSourceMessage.numberProcess < size))
+					{
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " хочет печатать на принтере Б" << endl;
 
-				//Пользователь просит разрешение на печать
-				if ((rankSourceMessage > 0) && (rankSourceMessage < size))
-				{
-					cout << "Пользователь №" << rankSourceMessage << " хочет печатать на любом принтере" << endl;
+						// принтер Б свободен
+						if (!busyPrinterB)
+						{
+							//принтер заняли
+							busyPrinterB = true;
+							//предоставление доступа на печать на принтере Б
+							MPI_Send(&rankSourceMessage, 1, MsgServerType, 2, signPrinterB, comm);
+							cout << "Пользователь №" << rankSourceMessage.numberProcess << " начал печатать на принтере Б" << endl;
+						}
+						//принтер Б занят печатью другого пользователя
+						else
+						{
+							//добавление пользователя в очередь
+							queuePrinterB.push_back(rankSourceMessage);
+						}
+					}
+					//принтер А закончил печать 
+					else if ((status.MPI_SOURCE == 1))
+					{
+						//отправка сообщения об окончании печати
+						MPI_Send(&exitPrintPrinterB, 1, MPI_INT, rankSourceMessage.numberProcess, printerB, comm);
+						//принтер свободен
+						busyPrinterB = false;
 
-					// принтер А свободен
-					if (!busyPrinterA)
-					{
-						//принтер заняли
-						busyPrinterA = true;
-						//предоставление доступа на печать на принтере А
-						MPI_Send(&canBePrintedA, 1, MPI_INT, rankSourceMessage, signPrinterAandB, comm);
-						cout << "Пользователь №" << rankSourceMessage << " начал печатать на принтере А" << endl;
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " закончил печатать на принтере Б" << endl;
 					}
-					// принтер Б свободен
-					else if (!busyPrinterB)
+					//у пользователей начались выходные - код выхода из программы
+					else if (rankSourceMessage.numberProcess == codeExit)
 					{
-						//принтер заняли
-						busyPrinterB = true;
-						//предоставление доступа на печать на принтере Б
-						MPI_Send(&canBePrintedB, 1, MPI_INT, rankSourceMessage, signPrinterAandB, comm);
-						cout << "Пользователь №" << rankSourceMessage << " начал печатать на принтере Б" << endl;
-					}
-					//принтер А занят печатью другого пользователя
-					else if (queuePrinterA.size() < queuePrinterB.size())
-					{
-						//добавление пользователя в очередь
-						queuePrinterA.push_back(rankSourceMessage);
-					}
-					//принтер Б занят печатью другого пользователя
-					else
-					{
-						//добавление пользователя в очередь
-						queuePrinterB.push_back(rankSourceMessage);
+						amountExitCode++;
+						cout << "Пользователь №" << status.MPI_SOURCE << " уходит на выходные" << endl;
 					}
 				}
-				//пользователь закончил печать на принтере А
-				else if ((rankSourceMessage == exitPrintPrinterA))
+				//отправил сообщение пользователь любого принтера
+				if (status.MPI_TAG == signPrinterAandB)
 				{
-					//освобождаем принтер
-					busyPrinterA = false;
-					cout << "Пользователь №" << status.MPI_SOURCE << " закончил печатать на принтере А" << endl;
-				}
-				//пользователь закончил печать на принтере Б
-				else if ((rankSourceMessage == exitPrintPrinterB))
-				{
-					//освобождаем принтер
-					busyPrinterB = false;
-					cout << "Пользователь №" << status.MPI_SOURCE << " закончил печатать на принтере Б" << endl;
-				}
-				//у пользователей начались выходные - код выхода из программы
-				else
-				{
-					amountExitCode++;
-					cout << "Пользователь №" << status.MPI_SOURCE << " уходит на выходные" << endl;
+					//получение желания пользователя на печать на принтере А или Б
+					MPI_Recv(&rankSourceMessage, 1, MsgServerType, status.MPI_SOURCE, signPrinterAandB, comm, &status);
+
+					//Пользователь просит разрешение на печать
+					if ((rankSourceMessage.numberProcess >= amountNotUsers) && (rankSourceMessage.numberProcess < size))
+					{
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " хочет печатать на любом принтере" << endl;
+
+						// принтер А свободен
+						if (!busyPrinterA)
+						{
+							//принтер заняли
+							busyPrinterA = true;
+							//предоставление доступа на печать на принтере А
+							MPI_Send(&rankSourceMessage, 1, MsgServerType, 1, signPrinterAandB, comm);
+							cout << "Пользователь №" << rankSourceMessage.numberProcess << " начал печатать на принтере А" << endl;
+						}
+						// принтер Б свободен
+						else if (!busyPrinterB)
+						{
+							//принтер заняли
+							busyPrinterB = true;
+							//предоставление доступа на печать на принтере Б
+							MPI_Send(&rankSourceMessage, 1, MsgServerType, 2, signPrinterAandB, comm);
+							cout << "Пользователь №" << rankSourceMessage.numberProcess << " начал печатать на принтере Б" << endl;
+						}
+						//принтер А занят печатью другого пользователя
+						else if (queuePrinterA.size() < queuePrinterB.size())
+						{
+							//добавление пользователя в очередь
+							queuePrinterA.push_back(rankSourceMessage);
+						}
+						//принтер Б занят печатью другого пользователя
+						else
+						{
+							//добавление пользователя в очередь
+							queuePrinterB.push_back(rankSourceMessage);
+						}
+					}
+					//пользователь закончил печать на принтере А
+					else if ((status.MPI_SOURCE == 1))
+					{
+						//отправка сообщения об окончании печати
+						MPI_Send(&exitPrintPrinterA, 1, MPI_INT, rankSourceMessage.numberProcess, signPrinterAandB, comm);
+						//освобождаем принтер
+						busyPrinterA = false;
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " закончил печатать на принтере А" << endl;
+					}
+					//пользователь закончил печать на принтере Б
+					else if ((status.MPI_SOURCE == 2))
+					{
+						//отправка сообщения об окончании печати
+						MPI_Send(&exitPrintPrinterB, 1, MPI_INT, rankSourceMessage.numberProcess, signPrinterAandB, comm);
+						//освобождаем принтер
+						busyPrinterB = false;
+						cout << "Пользователь №" << rankSourceMessage.numberProcess << " закончил печатать на принтере Б" << endl;
+					}
+					//у пользователей начались выходные - код выхода из программы
+					else if (rankSourceMessage.numberProcess == codeExit)
+					{
+						amountExitCode++;
+						cout << "Пользователь №" << status.MPI_SOURCE << " уходит на выходные" << endl;
+					}
 				}
 			}
 
 			//все пользователи ушли на выходные
-			if (amountExitCode == size - 1)
+			if (amountExitCode == size - amountNotUsers)
 			{
+				//выключение принтеров
+				messageServer.numberProcess = codeExit;
+				MPI_Send(&messageServer, 1, MsgServerType, 1, printerA, comm);
+				MPI_Send(&messageServer, 1, MsgServerType, 2, printerB, comm);
 				//выключение сервера
 				break;
+			}
+		}
+	}
+	//принтеры 
+	else if (printerA || printerB)
+	{
+		//имя файла куда печатать (наш принтер)
+		string fileNameToWrite;
+		if (printerA)
+		{
+			fileNameToWrite = "PrinterA.txt";
+		}
+		else
+		{
+			fileNameToWrite = "PrinterB.txt";
+		}
+
+		while (true)
+		{
+			//ищем задачу от сервера
+			MPI_Iprobe(0, MPI_ANY_TAG, comm, &flagMessage, &status);
+			//нашли сообщение
+			if (flagMessage)
+			{
+				//получили запрос
+				MPI_Recv(&messageServer, 1, MsgServerType, 0, status.MPI_TAG, comm, &status);
+				//печатаем на сервер
+				if (messageServer.numberProcess != codeExit)
+				{
+					//находим информацию для печати
+					string* readingInfo = Printer::ReadBook(messageServer.nameFile, messageServer.startPoint, messageServer.timeExecution);
+					//печатаем на принтере
+					Printer::PrintingOnPrinter(fileNameToWrite, messageServer.timeExecution, readingInfo, messageServer.numberProcess);
+
+					//сообщение серверу о конце печати
+					if (printerA)
+					{
+						messageServer.numberProcess = exitPrintPrinterA;
+					}
+					else
+					{
+						messageServer.numberProcess = exitPrintPrinterB;
+					}
+					MPI_Send(&messageServer, 1, MsgServerType, 0, status.MPI_TAG, comm);
+				}
+				else
+				{
+					break;
+				}
 			}
 		}
 	}
 	//пользователи
 	else
 	{
-		//прочитанное сообщение из книги
-		string* readMessage;
-
 		//количество строк на печать
 		int amountStringToPrint;
 		//точка старта откуда читать
 		int startPointToRead;
 		//принятое сообщение от сервера
 		int receivedMessage;
+
 		//номер итерации жизненного цикла
 		int iteration = 0;
-
-		//путь к файлу для чтения
-		string pathFileRead;
-		//путь к файлу для записи
-		string pathFileWrite;
+		//количество распечатанного материала
+		int amountPrintMaterial = 0;
+		//количество материала которое нужно распечатать
+		int amountWaitPrintMaterial = 0;
 
 		//жизненный цикл
 		for (; iteration < maxIteration; iteration++)
 		{
 			//пользователи принтера А
-			if (printerA)
+			if (userPrinterA)
 			{
-				pathFileRead = "Books\\jokes.txt";
-				pathFileWrite = "PrinterA.txt";
 				//определение нужно ли печатать
 				if (NeedToPrint(rank))
 				{
+					//путь к файлу для чтения
+					char pathFileRead[20] = "Books\\jokes.txt";
+
+					amountWaitPrintMaterial++;
 					//определение откуда начать чтение
 					startPointToRead = GenerateStartPointReadBook(rank, iteration);
 					//определение количества материала, которое нужно распечатать
 					amountStringToPrint = GenerateAmountStringPrint(rank, iteration);
 
-					//говорим серверу, что хотим печатать
-					MPI_Send(&rank, 1, MPI_INT, 0, signPrinterA, comm);
-					//получаем доступ к принтеру (ждем очередь)
-					MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterA, comm, &status);
+					//заполнение запроса
+					messageServer.numberProcess = rank;
+					messageServer.timeExecution = amountStringToPrint;
+					messageServer.startPoint = startPointToRead;
+					for (int i = 0; i < 20; i++)
+					{
+						messageServer.nameFile[i] = pathFileRead[i];
 
-					//выбираем материал для печати
-					readMessage = Printer::ReadBook(pathFileRead, startPointToRead, amountStringToPrint);
-					//печатаем на принтере (в файл)
-					Printer::PrintingOnPrinter(pathFileWrite, amountStringToPrint, readMessage, rank);
+					}
 
-					//сообщение конца печати (выходим из кабинета)
-					MPI_Send(&exitPrintPrinterA, 1, MPI_INT, 0, signPrinterA, comm);
-
-
-					//очистка памяти
-					delete[] readMessage;
+					//отправка запроса на печать
+					MPI_Send(&messageServer, 1, MsgServerType, 0, signPrinterA, comm);
+					//ищем уведомление о конце печати
+					MPI_Iprobe(0, signPrinterA, comm, &flagMessage, &status);
+					//распечаталось
+					if (flagMessage)
+					{
+						amountPrintMaterial++;
+						//берем распечатанный материал
+						MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterA, comm, &status);
+					}
 				}
 
 				//смотрим на календарь (ждем конца недели)
 				if (iteration == maxIteration - 1)
 				{
-					MPI_Send(&codeExit, 1, MPI_INT, 0, signPrinterA, comm);
+					//ждем конца печати
+					while (amountPrintMaterial != amountWaitPrintMaterial)
+					{
+						MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterA, comm, &status);
+					}
+					//отправка информации о конце рабочей недели
+					messageServer.numberProcess = codeExit;
+					MPI_Send(&messageServer, 1, MsgServerType, 0, signPrinterA, comm);
 				}
 			}
 			//пользователи принтера Б
-			if (printerB)
+			if (userPrinterB)
 			{
-				pathFileRead = "Books\\borodino.txt";
-				pathFileWrite = "PrinterB.txt";
 				//определение нужно ли печатать
 				if (NeedToPrint(rank))
 				{
+					//путь к файлу для чтения
+					char pathFileRead[20] = "Books\\borodino.txt";
+
+					amountWaitPrintMaterial++;
 					//определение откуда начать чтение
 					startPointToRead = GenerateStartPointReadBook(rank, iteration);
 					//определение количества материала, которое нужно распечатать
 					amountStringToPrint = GenerateAmountStringPrint(rank, iteration);
 
-					//говорим серверу, что хотим печатать
-					MPI_Send(&rank, 1, MPI_INT, 0, signPrinterB, comm);
-					//получаем доступ к принтеру (ждем очередь)
-					MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterB, comm, &status);
+					//заполнение запроса
+					messageServer.numberProcess = rank;
+					messageServer.timeExecution = amountStringToPrint;
+					messageServer.startPoint = startPointToRead;
+					for (int i = 0; i < 20; i++)
+					{
+						messageServer.nameFile[i] = pathFileRead[i];
 
-					//выбираем материал для печати
-					readMessage = Printer::ReadBook(pathFileRead, startPointToRead, amountStringToPrint);
-					//печатаем на принтере (в файл)
-					Printer::PrintingOnPrinter(pathFileWrite, amountStringToPrint, readMessage, rank);
+					}
 
-					//сообщение конца печати (выходим из кабинета)
-					MPI_Send(&exitPrintPrinterB, 1, MPI_INT, 0, signPrinterB, comm);
-
-					//очистка памяти
-					delete[] readMessage;
+					//отправка запроса на печать
+					MPI_Send(&messageServer, 1, MsgServerType, 0, signPrinterB, comm);
+					//ищем уведомление о конце печати
+					MPI_Iprobe(0, signPrinterB, comm, &flagMessage, &status);
+					//распечаталось
+					if (flagMessage)
+					{
+						amountPrintMaterial++;
+						//берем распечатанный материал
+						MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterB, comm, &status);
+					}
 				}
 
 				//смотрим на календарь (ждем конца недели)
 				if (iteration == maxIteration - 1)
 				{
-					MPI_Send(&codeExit, 1, MPI_INT, 0, signPrinterB, comm);
+					//ждем конца печати
+					while (amountPrintMaterial != amountWaitPrintMaterial)
+					{
+						MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterB, comm, &status);
+					}
+					//отправка информации о конце рабочей недели
+					messageServer.numberProcess = codeExit;
+					MPI_Send(&messageServer, 1, MsgServerType, 0, signPrinterB, comm);
 				}
 			}
 			//пользователи любого принтера 
-			if (printerAandB)
+			if (userPrinterAandB)
 			{
-				pathFileRead = "Books\\remedy.txt";
 				//определение нужно ли печатать
 				if (NeedToPrint(rank))
 				{
+					//путь к файлу для чтения
+					char pathFileRead[20] = "Books\\remedy.txt";
+
+					amountWaitPrintMaterial++;
 					//определение откуда начать чтение
 					startPointToRead = GenerateStartPointReadBook(rank, iteration);
 					//определение количества материала, которое нужно распечатать
 					amountStringToPrint = GenerateAmountStringPrint(rank, iteration);
 
-					//говорим серверу, что хотим печатать
-					MPI_Send(&rank, 1, MPI_INT, 0, signPrinterAandB, comm);
-					//получаем доступ к принтеру (ждем очередь)
-					MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterAandB, comm, &status);
+					//заполнение запроса
+					messageServer.numberProcess = rank;
+					messageServer.timeExecution = amountStringToPrint;
+					messageServer.startPoint = startPointToRead;
+					for (int i = 0; i < 20; i++)
+					{
+						messageServer.nameFile[i] = pathFileRead[i];
 
-					//проверяем на каком принтере печатаем
-					if (receivedMessage == canBePrintedA)
-					{
-						pathFileWrite = "PrinterA.txt";
-					}
-					else
-					{
-						pathFileWrite = "PrinterB.txt";
 					}
 
-					//выбираем материал для печати
-					readMessage = Printer::ReadBook(pathFileRead, startPointToRead, amountStringToPrint);
-					//печатаем на принтере (в файл)
-					Printer::PrintingOnPrinter(pathFileWrite, amountStringToPrint, readMessage, rank);
-
-					//сообщение конца печати (выходим из кабинета)
-					if (receivedMessage == canBePrintedA)
+					//отправка запроса на печать
+					MPI_Send(&messageServer, 1, MsgServerType, 0, signPrinterAandB, comm);
+					//ищем уведомление о конце печати
+					MPI_Iprobe(0, signPrinterAandB, comm, &flagMessage, &status);
+					//распечаталось
+					if (flagMessage)
 					{
-						MPI_Send(&exitPrintPrinterA, 1, MPI_INT, 0, signPrinterAandB, comm);
+						amountPrintMaterial++;
+						//берем распечатанный материал
+						MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterAandB, comm, &status);
 					}
-					else
-					{
-						MPI_Send(&exitPrintPrinterB, 1, MPI_INT, 0, signPrinterAandB, comm);
-					}
-
-					//очистка памяти
-					delete[] readMessage;
 				}
 
 				//смотрим на календарь (ждем конца недели)
 				if (iteration == maxIteration - 1)
 				{
-					MPI_Send(&codeExit, 1, MPI_INT, 0, signPrinterAandB, comm);
+					//ждем конца печати
+					while (amountPrintMaterial != amountWaitPrintMaterial)
+					{
+						MPI_Recv(&receivedMessage, 1, MPI_INT, 0, signPrinterAandB, comm, &status);
+					}
+					//отправка информации о конце рабочей недели
+					messageServer.numberProcess = codeExit;
+					MPI_Send(&messageServer, 1, MsgServerType, 0, signPrinterAandB, comm);
 				}
 			}
 		}
 	}
+
+	//освобождение типа
+	MPI_Type_free(&MsgServerType);
 	MPI_Finalize();
 	return 0;
 }
