@@ -206,6 +206,23 @@ struct MessageServer
 
 
 /// <summary>
+/// Сортировка - короткий работает первый без старения
+/// </summary>
+bool SjfWithoutAging(const MessageServer& msg1, const MessageServer& msg2)
+{
+	if (msg1.timeExecution < msg2.timeExecution)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
+
+
+/// <summary>
 /// Главная функция, где происходит параллельность
 /// </summary>
 int main(int argc, char** argv)
@@ -423,6 +440,8 @@ int main(int argc, char** argv)
 						{
 							//добавление пользователя в очередь
 							queuePrinterA.push_back(rankSourceMessage);
+							//сортировка очереди по времени выполнения 
+							queuePrinterA.sort(SjfWithoutAging);
 						}
 					}
 					//у пользователей начались выходные - код выхода из программы
@@ -468,6 +487,8 @@ int main(int argc, char** argv)
 						{
 							//добавление пользователя в очередь
 							queuePrinterB.push_back(rankSourceMessage);
+							//сортировка очереди по времени выполнения 
+							queuePrinterB.sort(SjfWithoutAging);
 						}
 					}
 					//у пользователей начались выходные - код выхода из программы
@@ -529,12 +550,16 @@ int main(int argc, char** argv)
 						{
 							//добавление пользователя в очередь
 							queuePrinterA.push_back(rankSourceMessage);
+							//сортировка очереди по времени выполнения 
+							queuePrinterA.sort(SjfWithoutAging);
 						}
 						//принтер Б занят печатью другого пользователя
 						else
 						{
 							//добавление пользователя в очередь
 							queuePrinterB.push_back(rankSourceMessage);
+							//сортировка очереди по времени выполнения 
+							queuePrinterB.sort(SjfWithoutAging);
 						}
 					}
 					//у пользователей начались выходные - код выхода из программы
