@@ -1,8 +1,17 @@
 ﻿  PrintersCourse.cpp
-C:\Users\vlaso\source\repos\PrintersCourse\PrintersCourse.cpp(10,42): warning C4101: status: неиспользованная локальная переменная
+C:\Users\vlaso\source\repos\PrintersCourse\PrintersCourse.cpp(55,13): warning C4244: аргумент: преобразование "time_t" в "unsigned int", возможна потеря данных
+C:\Users\vlaso\source\repos\PrintersCourse\PrintersCourse.cpp(79,26): warning C4244: аргумент: преобразование "time_t" в "unsigned int", возможна потеря данных
+C:\Users\vlaso\source\repos\PrintersCourse\PrintersCourse.cpp(96,26): warning C4244: аргумент: преобразование "time_t" в "unsigned int", возможна потеря данных
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Send в функции main.
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Recv в функции main.
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Iprobe в функции main.
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Type_create_struct в функции main.
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Get_address в функции main.
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Type_commit в функции main.
+PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Type_free в функции main.
 PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Comm_size в функции main.
 PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Comm_rank в функции main.
 PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Init в функции main.
 PrintersCourse.obj : error LNK2019: ссылка на неразрешенный внешний символ MPI_Finalize в функции main.
 C:\Program Files (x86)\Microsoft SDKs\MPI\Lib\x86\\msmpi.lib : warning LNK4272: тип компьютера библиотеки "x86" конфликтует с типом целевого компьютера "x64"
-C:\Users\vlaso\source\repos\PrintersCourse\x64\Debug\PrintersCourse.exe : fatal error LNK1120: неразрешенных внешних элементов: 4
+C:\Users\vlaso\source\repos\PrintersCourse\x64\Debug\PrintersCourse.exe : fatal error LNK1120: неразрешенных внешних элементов: 11
